@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Phosphate CRI 계산기</title>
+  <meta name="description" content="Phosphate 연속주입 계산 · 조제 레시피 산출 (포스텐 136.1 mg/20 mL, 1 mmol = 1 mL)" />
+  <style>
+    :root{ --blue:#1d4ed8; --lightblue:#dbeafe; --border:#e5e7eb; --bg:#f8fafc; --card:#fff; --red:#dc2626; }
+    body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:var(--bg);color:#0f172a;padding:12px}
+    h2{margin:0 0 12px;font-size:1.35rem;color:var(--blue);text-align:center}
+    h3{margin:0 0 8px;font-size:1.05rem;color:#111}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,.04)}
+    .row{display:flex;gap:12px;flex-wrap:wrap;align-items:stretch}
+    .ibox{border:2px solid var(--blue);border-radius:10px;padding:10px;background:#f9fafb;flex:1;display:flex;flex-direction:column;position:relative;min-width:120px;max-width:240px}
+    label{display:block;font-size:.85rem;color:var(--blue);margin-bottom:4px}
+    input[type=number]{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:0.95rem;box-sizing:border-box}
+    .dose-buttons{display:flex;gap:8px;flex-wrap:wrap}
+    .btn{border:1px solid var(--border);background:#fff;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:0.95rem}
+    .btn.active{border-color:var(--blue);background:#eff6ff;color:#1e40af}
+    .dose-note{color:var(--red);font-size:0.85rem;margin-top:6px;line-height:1.4}
+    table{width:100%;border-collapse:collapse;font-size:.9rem}
+    th,td{padding:6px;border-bottom:1px solid var(--border);text-align:left}
+    td.bold{font-weight:700}
+    .right{text-align:right}
+    .total{background:#eff6ff;font-weight:700}
+    .seg{display:flex;gap:12px;flex-wrap:wrap}
+    .seg label{color:#111;margin:0;font-size:0.95rem}
+    .seg .chip{display:inline-flex;align-items:center;gap:6px;border:2px solid var(--border);padding:10px 14px;border-radius:999px;background:#fff;cursor:pointer;transition:all .2s;font-size:0.95rem}
+    .seg input{display:none}
+    .seg input:checked + span{background:var(--lightblue);color:#000;border-color:var(--blue);font-weight:700}
+    .hidden{display:none}
+    .bignum{font-size:1.2rem;padding:10px 30px;text-align:center;border-width:2px}
+    .unit-label{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:0.9rem;color:#374151}
+    .note{color:var(--red);font-size:0.9rem;margin-top:10px;text-align:center}
+
+    /* 모바일 최적화 */
+    @media (max-width: 600px){
+      .row{flex-direction:column}
+      .ibox{max-width:100%}
+    }
+  </style>
+</head>
+<body>
+  <h2>Phosphate CRI 계산기</h2>
+
+  <div class="card">
+    <h3>⚙️ 기본 입력 <span style='font-size:0.85em'>(포스텐 136.1 mg/20 mL, 1 mmol = 1 mL)</span></h3>
+    <div class="row">
+      <div class="ibox"><label for="bw">체중 (kg)</label><input id="bw" type="number" step="0.1"></div>
+      <div class="ibox"><label for="flow">수액속도 (mL/hr)</label><input id="flow" type="number" step="0.1"></div>
+      <div class="ibox"><label>용량 선택 (mmol/kg/hr)</label>
+        <div id="doseBtns" class="dose-buttons"></div>
+        <div class="dose-note">
+          • 혈중 인 &lt;1 mg/dL: 0.06–0.12 mmol/kg/hr<br>
+          • 혈중 인 1–2 mg/dL: 0.03 mmol/kg/hr
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🧪 조제 기준 선택</h3>
+    <div class="ibox" style="max-width:100%">
+      <div class="seg" id="modeSeg">
+        <label class="chip"><input type="radio" name="mode" value="time"><span> 총시간</span></label>
+        <label class="chip"><input type="radio" name="mode" value="volume"><span>총량</span></label>
+        <label class="chip"><input type="radio" name="mode" value="default" checked><span>100mL 수액+Phosphate add</span></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div class="ibox mode-input mode-time hidden" style="max-width:200px">
+          <input id="hours" class="bignum" type="number" step="1" min="1" placeholder="12">
+          <span class="unit-label">hr</span>
+        </div>
+        <div class="ibox mode-input mode-volume hidden" style="max-width:200px">
+          <input id="volume" class="bignum" type="number" step="1" min="1" placeholder="60">
+          <span class="unit-label">mL</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📊 조제 레시피</h3>
+    <table>
+      <tbody>
+        <tr><td>시간당 약물량</td><td class="right" id="needPerHr">-</td></tr>
+        <tr><td>총 조제량</td><td class="right" id="totalV">-</td></tr>
+        <tr><td class="bold">약물량 / 수액량</td><td class="right bold" id="mixPair">-</td></tr>
+      </tbody>
+      <tfoot>
+        <tr class="total"><td>앰플</td><td class="right" id="ampCount">-</td></tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <script>
+    const STOCK_MMOL_ML = 1.0; // 포스텐 1 mmol = 1 mL
+    const AMPULE_ML = 20.0;    // 1앰플 20 mL
+    const DOSES = [0.03, 0.06, 0.09, 0.12]; // mmol/kg/hr
+
+    const $ = (q)=>document.querySelector(q);
+    const bw = $('#bw');
+    const flow = $('#flow');
+    const hours = $('#hours');
+    const volume = $('#volume');
+    const needPerHr = $('#needPerHr');
+    const totalV = $('#totalV');
+    const mixPair = $('#mixPair');
+    const ampCount = $('#ampCount');
+
+    const fmt = (x)=> (isFinite(x)? Number(x).toFixed(2) : '-');
+
+    let selectedDose = DOSES[0];
+    function renderDoseBtns(){
+      const wrap = $('#doseBtns');
+      wrap.innerHTML = '';
+      DOSES.forEach(d=>{
+        const b = document.createElement('button');
+        b.className = 'btn'+(d===selectedDose?' active':'');
+        b.textContent = d;
+        b.onclick = ()=>{ selectedDose=d; renderDoseBtns(); recalc(); };
