@@ -12,13 +12,12 @@
     h3{margin:0 0 8px;font-size:1.05rem;color:#111}
     .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;box-shadow:0 2px 6px rgba(0,0,0,.04)}
     .row{display:flex;gap:12px;flex-wrap:wrap;align-items:stretch}
-    .ibox{border:2px solid var(--blue);border-radius:10px;padding:10px;background:#f9fafb;flex:1;display:flex;flex-direction:column;position:relative;min-width:120px;max-width:240px}
+    .ibox{border:2px solid var(--blue);border-radius:10px;padding:10px;background:#f9fafb;flex:1;display:flex;flex-direction:column;position:relative;min-width:120px;max-width:260px}
     label{display:block;font-size:.85rem;color:var(--blue);margin-bottom:4px}
-    input[type=number]{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:0.95rem;box-sizing:border-box}
-    .dose-buttons{display:flex;gap:8px;flex-wrap:wrap}
-    .btn{border:1px solid var(--border);background:#fff;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:0.95rem}
-    .btn.active{border-color:var(--blue);background:#eff6ff;color:#1e40af}
-    .dose-note{color:var(--red);font-size:0.85rem;margin-top:6px;line-height:1.4}
+    input[type=number], input[type=range]{width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:0.95rem;box-sizing:border-box}
+    input[type=range]{padding:0}
+    .dose-display{margin-top:6px;font-weight:700;color:#1e40af;font-size:1rem;text-align:center}
+    .ticks{display:flex;justify-content:space-between;font-size:0.75rem;color:#374151;margin-top:4px}
     table{width:100%;border-collapse:collapse;font-size:.9rem}
     th,td{padding:6px;border-bottom:1px solid var(--border);text-align:left}
     td.bold{font-weight:700}
@@ -32,7 +31,7 @@
     .hidden{display:none}
     .bignum{font-size:1.2rem;padding:10px 30px;text-align:center;border-width:2px}
     .unit-label{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:0.9rem;color:#374151}
-    .note{color:var(--red);font-size:0.9rem;margin-top:10px;text-align:center}
+    .dose-note{color:#334155;font-size:0.85rem;margin-top:12px;line-height:1.4}
 
     /* 모바일 최적화 */
     @media (max-width: 600px){
@@ -49,8 +48,10 @@
     <div class="row">
       <div class="ibox"><label for="bw">체중 (kg)</label><input id="bw" type="number" step="0.1"></div>
       <div class="ibox"><label for="flow">수액속도 (mL/hr)</label><input id="flow" type="number" step="0.1"></div>
-      <div class="ibox"><label>용량 선택 (mmol/kg/hr)</label>
-        <div id="doseBtns" class="dose-buttons"></div>
+      <div class="ibox"><label for="dose">용량 (mmol/kg/hr)</label>
+        <input id="dose" type="range" min="0.03" max="0.12" step="0.03" value="0.06">
+        <div class="ticks"><span>0.03</span><span>0.06</span><span>0.09</span><span>0.12</span></div>
+        <div id="doseVal" class="dose-display">0.06 mmol/kg/hr</div>
         <div class="dose-note">
           • 혈중 인 &lt;1 mg/dL: 0.06–0.12 mmol/kg/hr<br>
           • 혈중 인 1–2 mg/dL: 0.03 mmol/kg/hr
@@ -97,11 +98,12 @@
   <script>
     const STOCK_MMOL_ML = 1.0; // 포스텐 1 mmol = 1 mL
     const AMPULE_ML = 20.0;    // 1앰플 20 mL
-    const DOSES = [0.03, 0.06, 0.09, 0.12]; // mmol/kg/hr
 
     const $ = (q)=>document.querySelector(q);
     const bw = $('#bw');
     const flow = $('#flow');
+    const dose = $('#dose');
+    const doseVal = $('#doseVal');
     const hours = $('#hours');
     const volume = $('#volume');
     const needPerHr = $('#needPerHr');
@@ -111,12 +113,75 @@
 
     const fmt = (x)=> (isFinite(x)? Number(x).toFixed(2) : '-');
 
-    let selectedDose = DOSES[0];
-    function renderDoseBtns(){
-      const wrap = $('#doseBtns');
-      wrap.innerHTML = '';
-      DOSES.forEach(d=>{
-        const b = document.createElement('button');
-        b.className = 'btn'+(d===selectedDose?' active':'');
-        b.textContent = d;
-        b.onclick = ()=>{ selectedDose=d; renderDoseBtns(); recalc(); };
+    let mode = 'default';
+    document.querySelectorAll('input[name="mode"]').forEach(r=>{
+      r.addEventListener('change', ()=>{ mode = r.value; updateModeUI(); recalc(); });
+    });
+
+    function updateModeUI(){
+      document.querySelectorAll('.mode-input').forEach(div=>div.classList.add('hidden'));
+      if(mode==='time') document.querySelector('.mode-time').classList.remove('hidden');
+      if(mode==='volume') document.querySelector('.mode-volume').classList.remove('hidden');
+    }
+
+    dose.addEventListener('input', ()=>{
+      doseVal.textContent = `${dose.value} mmol/kg/hr`;
+      recalc();
+    });
+
+    function recalc(){
+      const W = parseFloat(bw.value);
+      const F = parseFloat(flow.value);
+      const D = parseFloat(dose.value);
+
+      if(!(W>0) || !(D>0) || !(F>0)){
+        needPerHr.textContent = '-';
+        totalV.textContent = '-';
+        mixPair.textContent = '-';
+        ampCount.textContent = '-';
+        return;
+      }
+
+      // mmol/kg/hr → mmol/hr
+      const mmol_per_hr = D * W;
+      needPerHr.textContent = `${fmt(mmol_per_hr)} mmol/hr`;
+
+      let V; // 총부피(mL)
+      let stock_mL; // 원액 사용량(mL)
+      if(mode==='time'){
+        const H = parseFloat(hours.value) || parseFloat(hours.placeholder);
+        V = F * H;
+        const total_mmol = mmol_per_hr * H;
+        stock_mL = total_mmol / STOCK_MMOL_ML;
+        totalV.textContent = `${fmt(total_mmol)} mmol`;
+      } else if(mode==='volume'){
+        const Vin = parseFloat(volume.value) || parseFloat(volume.placeholder);
+        V = Vin;
+        const total_mmol = (mmol_per_hr / F) * V;
+        stock_mL = total_mmol / STOCK_MMOL_ML;
+        totalV.textContent = `${fmt(total_mmol)} mmol`;
+      } else { // 100 mL 수액 기준
+        const diluent_mL = 100;
+        const C_mmol_mL = mmol_per_hr / F; // 필요 농도 (mmol/mL)
+        stock_mL = (C_mmol_mL * diluent_mL) / STOCK_MMOL_ML;
+        V = stock_mL + diluent_mL;
+        totalV.textContent = `${fmt(V)} mL (100 mL 수액 기준)`;
+      }
+
+      if(!isFinite(stock_mL)){
+        mixPair.textContent = '⚠️ 입력값을 확인하세요';
+        ampCount.textContent = '-';
+        return;
+      }
+
+      const dil_mL = V - stock_mL;
+      mixPair.textContent = `약물 ${fmt(stock_mL)} mL + 수액 ${fmt(dil_mL)} mL`;
+      const ampExact = stock_mL / AMPULE_ML;
+      ampCount.textContent = `${fmt(ampExact)} 개 (=${fmt(stock_mL)} mL)`;
+    }
+
+    [bw,flow,hours,volume].forEach(el=>['input','change','keyup'].forEach(ev=>el.addEventListener(ev,recalc)));
+    recalc();
+  </script>
+</body>
+</html>
